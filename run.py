@@ -1,5 +1,6 @@
 import os
 import sys
+import sqlite3
 from dotenv import load_dotenv
 import discord
 from discord.ext import commands
@@ -28,6 +29,18 @@ logger.addHandler(file_handler)
 # Load environment variables from .env file
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+
+# Get the database file name from environment variable or fallback to default name
+DATABASE_FILE = os.getenv('DATABASE_FILE', 'bot.db')
+
+# Check if the database file exists, create it if it doesn't
+if not os.path.exists(DATABASE_FILE):
+    conn = sqlite3.connect(DATABASE_FILE)
+    conn.close()
+
+# Create SQLite database connection
+conn = sqlite3.connect(DATABASE_FILE)
+cursor = conn.cursor()
 
 # Create bot and slash command instances
 bot = commands.Bot(command_prefix='/', intents=discord.Intents.default())
