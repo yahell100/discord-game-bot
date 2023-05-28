@@ -1,0 +1,12 @@
+version: '3'
+services:
+
+  voicechat-lvlup-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./bot.db:/app/bot.db

@@ -1,0 +1,27 @@
+# Exclude Python bytecode files
+**/*.pyc
+
+# Exclude development and version control files
+.dockerignore
+.git
+.gitignore
+
+# Exclude enviroment files
+.env
+
+# Exclude editor and IDE files
+.vscode
+*.sublime-project
+*.sublime-workspace
+*.idea
+*.pyc
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+*.bak
+
+# Exclude other temporary or build files
+*.log
+*.db
