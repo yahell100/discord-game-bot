@@ -199,16 +199,24 @@ def update_owned_games(steam_id: str, discord_id: int):
         game_name = game['name']
 
         # Insert game into Games table (ignore if already exists)
-        cursor.execute('''
-            INSERT OR IGNORE INTO Games (app_id, name)
-            VALUES (?, ?)
-        ''', (app_id, game_name))
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO Games (app_id, name)
+                VALUES (?, ?)
+            ''', (app_id, game_name))
+        except sqlite3.Error as e:
+            logger.error(f"Error occurred while inserting game into Games table: {e}")
+            continue
 
         # Insert game into UserGames table
-        cursor.execute('''
-            INSERT OR IGNORE INTO UserGames (discord_id, app_id)
-            VALUES (?, ?)
-        ''', (discord_id, app_id))
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO UserGames (discord_id, app_id)
+                VALUES (?, ?)
+            ''', (discord_id, app_id))
+        except sqlite3.Error as e:
+            logger.error(f"Error occurred while inserting game into UserGames table: {e}")
+            continue
 
     # Commit the transaction
     conn.commit()
@@ -251,10 +259,15 @@ async def _linksteam(ctx: SlashContext, steam_id: str):
 
     try:
         # Insert the user's Discord ID and Steam ID into the Users table
-        cursor.execute('''
-            INSERT INTO Users (discord_id, steam_id)
-            VALUES (?, ?)
-        ''', (ctx.author.id, steam_id))
+        try:
+            cursor.execute('''
+                INSERT INTO Users (discord_id, steam_id)
+                VALUES (?, ?)
+            ''', (ctx.author.id, steam_id))
+        except sqlite3.Error as e:
+            logger.error(f"Error occurred while linking Steam ID to Discord ID: {e}")
+            await ctx.send("Failed to link your Discord account to your Steam account.")
+            return
 
         # Commit the transaction
         conn.commit()
@@ -328,11 +341,16 @@ async def _markinstalled(ctx: SlashContext, game: str):
     result = cursor.fetchone()
     if result:
         # The game is owned by the user, mark it as installed
-        cursor.execute('''
-            UPDATE UserGames
-            SET installed = TRUE
-            WHERE discord_id = ? AND app_id = ?
-        ''', (ctx.author.id, app_id))
+        try:
+            cursor.execute('''
+                UPDATE UserGames
+                SET installed = TRUE
+                WHERE discord_id = ? AND app_id = ?
+            ''', (ctx.author.id, app_id))
+        except sqlite3.Error as e:
+            logger.error(f"Error occurred while marking game as installed: {e}")
+            await ctx.send("Failed to mark the game as installed.")
+            return
 
         conn.commit()
         await ctx.send(f"Successfully marked {game_name} as installed.")
@@ -372,42 +390,50 @@ async def _markuninstalled(ctx: SlashContext, game: str):
         await ctx.send(f"No game found with the name or App ID '{game}'")
         return
 
-    cursor.execute('''
-        UPDATE UserGames 
-        SET installed = 0
-        WHERE discord_id = ? AND app_id = ?
-    ''', (str(ctx.author.id), app_id))
-    conn.commit()
+    try:
+        cursor.execute('''
+            UPDATE UserGames 
+            SET installed = 0
+            WHERE discord_id = ? AND app_id = ?
+        ''', (str(ctx.author.id), app_id))
+        conn.commit()
 
-    await ctx.send(f"Game '{game_name}' has been marked as uninstalled.")
+        await ctx.send(f"Game '{game_name}' has been marked as uninstalled.")
+    except sqlite3.Error as e:
+        logger.error(f"Error occurred while marking game as uninstalled: {e}")
+        await ctx.send("Failed to mark the game as uninstalled.")
 
 @slash.slash(
     name="listinstalledgames",
     description="Lists all games marked as installed by the user, grouped by installation status.",
 )
 async def _listinstalledgames(ctx: SlashContext):
-    cursor.execute('''
-        SELECT Games.name
-        FROM UserGames 
-        INNER JOIN Games ON UserGames.app_id = Games.app_id
-        WHERE UserGames.discord_id = ? AND UserGames.installed = 1
-    ''', (str(ctx.author.id),))
+    try:
+        cursor.execute('''
+            SELECT Games.name
+            FROM UserGames 
+            INNER JOIN Games ON UserGames.app_id = Games.app_id
+            WHERE UserGames.discord_id = ? AND UserGames.installed = 1
+        ''', (str(ctx.author.id),))
 
-    results = cursor.fetchall()
-    if not results:
-        await ctx.send("No installed games found.")
-        return
+        results = cursor.fetchall()
+        if not results:
+            await ctx.send("No installed games found.")
+            return
 
-    installed_games = [game_name for game_name, in results]
+        installed_games = [game_name for game_name, in results]
 
-    # Formatting the list of games using Discord's Markdown
-    installed_str = "**Installed Games**:\n" + "\n".join(f"• {game_name}" for game_name in installed_games)
+        # Formatting the list of games using Discord's Markdown
+        installed_str = "**Installed Games**:\n" + "\n".join(f"• {game_name}" for game_name in installed_games)
 
-    if len(installed_str) > 2000:
-        for chunk in [installed_str[i:i + 2000] for i in range(0, len(installed_str), 2000)]:
-            await ctx.send(chunk)
-    else:
-        await ctx.send(installed_str)
+        if len(installed_str) > 2000:
+            for chunk in [installed_str[i:i + 2000] for i in range(0, len(installed_str), 2000)]:
+                await ctx.send(chunk)
+        else:
+            await ctx.send(installed_str)
+    except sqlite3.Error as e:
+        logger.error(f"Error occurred while listing installed games: {e}")
+        await ctx.send("Failed to list installed games.")
 
 @slash.slash(
     name="players",
@@ -442,30 +468,34 @@ async def _players(ctx: SlashContext, game: str):
         await ctx.send(f"No game found with the name or App ID '{game}'")
         return
 
-    # Fetch all users who own this game and whether they have it installed
-    cursor.execute('''
-        SELECT discord_id, installed FROM UserGames 
-        WHERE app_id = ?
-    ''', (app_id,))
-    game_owners = {row[0]: bool(row[1]) for row in cursor.fetchall()}
+    try:
+        # Fetch all users who own this game and whether they have it installed
+        cursor.execute('''
+            SELECT discord_id, installed FROM UserGames 
+            WHERE app_id = ?
+        ''', (app_id,))
+        game_owners = {row[0]: bool(row[1]) for row in cursor.fetchall()}
 
-    if not game_owners:
-        await ctx.send(f"No players in this server own the game '{game_name}'")
-        return
+        if not game_owners:
+            await ctx.send(f"No players in this server own the game '{game_name}'")
+            return
 
-    member_list = []
-    for discord_id, installed in game_owners.items():
-        user = await bot.fetch_user(int(discord_id))
-        name = f"{user.name} (Installed)" if installed else user.name
-        member_list.append(name)
+        member_list = []
+        for discord_id, installed in game_owners.items():
+            user = await bot.fetch_user(int(discord_id))
+            name = f"{user.name} (Installed)" if installed else user.name
+            member_list.append(name)
 
-    member_names = "\n".join(member_list)
+        member_names = "\n".join(member_list)
 
-    # Create embed
-    embed = Embed(title=game_name, url=f"https://store.steampowered.com/app/{app_id}")
-    embed.add_field(name="Players", value=member_names, inline=False)
+        # Create embed
+        embed = Embed(title=game_name, url=f"https://store.steampowered.com/app/{app_id}")
+        embed.add_field(name="Players", value=member_names, inline=False)
 
-    await ctx.send(embed=embed)
+        await ctx.send(embed=embed)
+    except sqlite3.Error as e:
+        logger.error(f"Error occurred while listing players: {e}")
+        await ctx.send("Failed to list players.")
 
 @slash.slash(
     name="sendmessage",
@@ -512,37 +542,41 @@ async def _sendmessage(ctx: SlashContext, game: str, message: str, installed_onl
         await ctx.send(f"No game found with the name or App ID '{game}'")
         return
 
-    # Fetch all users who own or have the game installed
-    cursor.execute('''
-        SELECT discord_id, installed FROM UserGames 
-        WHERE app_id = ?
-    ''', (app_id,))
-    game_players = {str(row[0]): bool(row[1]) for row in cursor.fetchall()}
+    try:
+        # Fetch all users who own or have the game installed
+        cursor.execute('''
+            SELECT discord_id, installed FROM UserGames 
+            WHERE app_id = ?
+        ''', (app_id,))
+        game_players = {str(row[0]): bool(row[1]) for row in cursor.fetchall()}
 
-    if not game_players:
-        await ctx.send(f"No players found for the game '{game_name}'")
-        return
+        if not game_players:
+            await ctx.send(f"No players found for the game '{game_name}'")
+            return
 
-    player_list = []
+        player_list = []
 
-    for discord_id, installed in game_players.items():
-        try:
-            member = await ctx.guild.fetch_member(int(discord_id))
-            if member:
-                if installed_only and not installed:
-                    continue
-                player_list.append(member.mention)
-        except discord.NotFound:
-            pass
+        for discord_id, installed in game_players.items():
+            try:
+                member = await ctx.guild.fetch_member(int(discord_id))
+                if member:
+                    if installed_only and not installed:
+                        continue
+                    player_list.append(member.mention)
+            except discord.NotFound:
+                pass
 
-    if not player_list:
-        await ctx.send("No players found for the specified criteria.")
-        return
+        if not player_list:
+            await ctx.send("No players found for the specified criteria.")
+            return
 
-    message_content = f"Message from {ctx.author.mention}: {message}"
-    mention_list = " ".join(player_list)
+        message_content = f"Message from {ctx.author.mention}: {message}"
+        mention_list = " ".join(player_list)
 
-    await ctx.send(f"Sending message to {len(player_list)} players...")
-    await ctx.send(f"{mention_list}\n\n{message_content}")
+        await ctx.send(f"Sending message to {len(player_list)} players...")
+        await ctx.send(f"{mention_list}\n\n{message_content}")
+    except sqlite3.Error as e:
+        logger.error(f"Error occurred while sending message to players: {e}")
+        await ctx.send("Failed to send message to players.")
 
 bot.run(TOKEN)
