@@ -173,9 +173,9 @@ async def _searchgame(ctx: SlashContext, game_name: str):
         embed.set_image(url=game_info['header_image'])
         embed.add_field(name="App ID", value=game_info['app_id'], inline=False)
         embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, hidden=True)
     else:
-        await ctx.send("No game information found.")
+        await ctx.send("No game information found.", hidden=True)
 
 def update_owned_games(steam_id: str, discord_id: int):
     base_url = f"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
@@ -232,7 +232,7 @@ async def invite(ctx):
     permissions = discord.Permissions()
     invite_link = discord.utils.oauth_url(ctx.bot.user.id, permissions=permissions)
     await ctx.author.send(f"Invite link for the bot: {invite_link}")
-    await ctx.send("I've sent you a direct message with the invite link!")
+    await ctx.send("I've sent you a direct message with the invite link!", hidden=True)
 
 @slash.slash(
     name="linksteam",
@@ -249,12 +249,12 @@ async def invite(ctx):
 async def _linksteam(ctx: SlashContext, steam_id: str):
     # Check if the Steam ID is numeric and starts with '7656119'
     if not steam_id.isnumeric() or not steam_id.startswith('7656119'):
-        await ctx.send("Invalid Steam ID. Please enter a valid Steam ID64.")
+        await ctx.send("Invalid Steam ID. Please enter a valid Steam ID64.", hidden=True)
         return
     
     # Validate Steam ID against third party
     if not validate_steam_id(steam_id):
-        await ctx.send("Invalid Steam ID. Please enter a valid Steam ID.")
+        await ctx.send("Invalid Steam ID. Please enter a valid Steam ID.", hidden=True)
         return
 
     try:
@@ -266,18 +266,18 @@ async def _linksteam(ctx: SlashContext, steam_id: str):
             ''', (ctx.author.id, steam_id))
         except sqlite3.Error as e:
             logger.error(f"Error occurred while linking Steam ID to Discord ID: {e}")
-            await ctx.send("Failed to link your Discord account to your Steam account.")
+            await ctx.send("Failed to link your Discord account to your Steam account.", hidden=True)
             return
 
         # Commit the transaction
         conn.commit()
 
         if update_owned_games(steam_id, ctx.author.id):
-            await ctx.send("Successfully linked your Discord account to your Steam account and updated your game list.")
+            await ctx.send("Successfully linked your Discord account to your Steam account and updated your game list.", hidden=True)
         else:
-            await ctx.send("Successfully linked your Discord account to your Steam account, but failed to update your game list.")
+            await ctx.send("Successfully linked your Discord account to your Steam account, but failed to update your game list.", hidden=True)
     except sqlite3.IntegrityError:
-        await ctx.send("This Steam ID is already linked to a different Discord account.")
+        await ctx.send("This Steam ID is already linked to a different Discord account.", hidden=True)
 
 @slash.slash(
     name="updategames",
@@ -296,11 +296,11 @@ async def _updategames(ctx: SlashContext):
         steam_id = result[0]
 
         if update_owned_games(steam_id, ctx.author.id):
-            await ctx.send("Successfully updated your game list.")
+            await ctx.send("Successfully updated your game list.", hidden=True)
         else:
-            await ctx.send("Failed to update your game list.")
+            await ctx.send("Failed to update your game list.", hidden=True)
     else:
-        await ctx.send("Your Discord account is not linked to any Steam account.")
+        await ctx.send("Your Discord account is not linked to any Steam account.", hidden=True)
 
 @slash.slash(
     name="markinstalled",
@@ -320,7 +320,7 @@ async def _markinstalled(ctx: SlashContext, game: str):
         app_id = game
         game_info = get_game_info(app_id)
         if game_info is None:
-            await ctx.send("Invalid App ID.")
+            await ctx.send("Invalid App ID.", hidden=True)
             return
         game_name = game_info['name']
     else:
@@ -329,7 +329,7 @@ async def _markinstalled(ctx: SlashContext, game: str):
             app_id = game_info['app_id']
             game_name = game_info['name']
         else:
-            await ctx.send("Game not found.")
+            await ctx.send("Game not found.", hidden=True)
             return
 
     # Check if the game is owned by the user
@@ -349,13 +349,13 @@ async def _markinstalled(ctx: SlashContext, game: str):
             ''', (ctx.author.id, app_id))
         except sqlite3.Error as e:
             logger.error(f"Error occurred while marking game as installed: {e}")
-            await ctx.send("Failed to mark the game as installed.")
+            await ctx.send("Failed to mark the game as installed.", hidden=True)
             return
 
         conn.commit()
-        await ctx.send(f"Successfully marked {game_name} as installed.")
+        await ctx.send(f"Successfully marked {game_name} as installed.", hidden=True)
     else:
-        await ctx.send(f"You don't own {game_name}.")
+        await ctx.send(f"You don't own {game_name}.", hidden=True)
 
 @slash.slash(
     name="markuninstalled",
@@ -387,7 +387,7 @@ async def _markuninstalled(ctx: SlashContext, game: str):
             game_name = game
 
     if app_id is None:
-        await ctx.send(f"No game found with the name or App ID '{game}'")
+        await ctx.send(f"No game found with the name or App ID '{game}'", hidden=True)
         return
 
     try:
@@ -398,10 +398,10 @@ async def _markuninstalled(ctx: SlashContext, game: str):
         ''', (str(ctx.author.id), app_id))
         conn.commit()
 
-        await ctx.send(f"Game '{game_name}' has been marked as uninstalled.")
+        await ctx.send(f"Game '{game_name}' has been marked as uninstalled.", hidden=True)
     except sqlite3.Error as e:
         logger.error(f"Error occurred while marking game as uninstalled: {e}")
-        await ctx.send("Failed to mark the game as uninstalled.")
+        await ctx.send("Failed to mark the game as uninstalled.", hidden=True)
 
 @slash.slash(
     name="listinstalledgames",
@@ -428,12 +428,12 @@ async def _listinstalledgames(ctx: SlashContext):
 
         if len(installed_str) > 2000:
             for chunk in [installed_str[i:i + 2000] for i in range(0, len(installed_str), 2000)]:
-                await ctx.send(chunk)
+                await ctx.send(chunk, hidden=True)
         else:
-            await ctx.send(installed_str)
+            await ctx.send(installed_str, hidden=True)
     except sqlite3.Error as e:
         logger.error(f"Error occurred while listing installed games: {e}")
-        await ctx.send("Failed to list installed games.")
+        await ctx.send("Failed to list installed games.", hidden=True)
 
 @slash.slash(
     name="players",
@@ -465,7 +465,7 @@ async def _players(ctx: SlashContext, game: str):
             game_name = game
 
     if app_id is None:
-        await ctx.send(f"No game found with the name or App ID '{game}'")
+        await ctx.send(f"No game found with the name or App ID '{game}'", hidden=True)
         return
 
     try:
@@ -477,7 +477,7 @@ async def _players(ctx: SlashContext, game: str):
         game_owners = {row[0]: bool(row[1]) for row in cursor.fetchall()}
 
         if not game_owners:
-            await ctx.send(f"No players in this server own the game '{game_name}'")
+            await ctx.send(f"No players in this server own the game '{game_name}'", hidden=True)
             return
 
         member_list = []
@@ -492,10 +492,10 @@ async def _players(ctx: SlashContext, game: str):
         embed = Embed(title=game_name, url=f"https://store.steampowered.com/app/{app_id}")
         embed.add_field(name="Players", value=member_names, inline=False)
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, hidden=True)
     except sqlite3.Error as e:
         logger.error(f"Error occurred while listing players: {e}")
-        await ctx.send("Failed to list players.")
+        await ctx.send("Failed to list players.", hidden=True)
 
 @slash.slash(
     name="sendmessage",
@@ -539,7 +539,7 @@ async def _sendmessage(ctx: SlashContext, game: str, message: str, installed_onl
             game_name = game
 
     if app_id is None:
-        await ctx.send(f"No game found with the name or App ID '{game}'")
+        await ctx.send(f"No game found with the name or App ID '{game}'", hidden=True)
         return
 
     try:
@@ -551,7 +551,7 @@ async def _sendmessage(ctx: SlashContext, game: str, message: str, installed_onl
         game_players = {str(row[0]): bool(row[1]) for row in cursor.fetchall()}
 
         if not game_players:
-            await ctx.send(f"No players found for the game '{game_name}'")
+            await ctx.send(f"No players found for the game '{game_name}'", hidden=True)
             return
 
         player_list = []
@@ -567,16 +567,16 @@ async def _sendmessage(ctx: SlashContext, game: str, message: str, installed_onl
                 pass
 
         if not player_list:
-            await ctx.send("No players found for the specified criteria.")
+            await ctx.send("No players found for the specified criteria.", hidden=True)
             return
 
         message_content = f"Message from {ctx.author.mention}: {message}"
         mention_list = " ".join(player_list)
 
-        await ctx.send(f"Sending message to {len(player_list)} players...")
+        await ctx.send(f"Sending message to {len(player_list)} players...", hidden=True)
         await ctx.send(f"{mention_list}\n\n{message_content}")
     except sqlite3.Error as e:
         logger.error(f"Error occurred while sending message to players: {e}")
-        await ctx.send("Failed to send message to players.")
+        await ctx.send("Failed to send message to players.", hidden=True)
 
 bot.run(TOKEN)
