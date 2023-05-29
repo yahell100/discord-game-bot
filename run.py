@@ -53,13 +53,22 @@ cursor.execute('''
     )
 ''')
 
-# Create UserGames table
+# Create Games table
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS Games (
+        app_id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL
+    )
+''')
+
+# Modify UserGames table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS UserGames (
         discord_id INTEGER,
         app_id INTEGER,
         PRIMARY KEY (discord_id, app_id),
-        FOREIGN KEY (discord_id) REFERENCES Users (discord_id)
+        FOREIGN KEY (discord_id) REFERENCES Users (discord_id),
+        FOREIGN KEY (app_id) REFERENCES Games (app_id)
     )
 ''')
 
@@ -119,34 +128,6 @@ def search_steam_game(game_name):
         logger.warning(f"No search results found for game: {game_name}")
         return None
 
-@slash.slash(name="searchgame", description="Search a game on Steam", options=[{
-    "name": "game_name",
-    "description": "Name of the game to search",
-    "type": 3,
-    "required": True
-}])
-async def _searchgame(ctx: SlashContext, game_name: str):
-    game_info = search_steam_game(game_name)
-    if game_info:
-        embed = discord.Embed(title=game_info['name'], url=game_info['steam_url'], color=discord.Color.blue())
-        embed.set_image(url=game_info['header_image'])
-        embed.add_field(name="App ID", value=game_info['app_id'], inline=False)
-        embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
-        await ctx.send(embed=embed)
-    else:
-        await ctx.send("No game information found.")
-
-@slash.slash(
-    name="invite",
-    description="Generates an invite link for the bot.",
-    default_permission=False
-)
-async def invite(ctx):
-    permissions = discord.Permissions()
-    invite_link = discord.utils.oauth_url(ctx.bot.user.id, permissions=permissions)
-    await ctx.author.send(f"Invite link for the bot: {invite_link}")
-    await ctx.send("I've sent you a direct message with the invite link!")
-
 def validate_steam_id(steam_id: str) -> bool:
     base_url = f"http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/"
     params = {
@@ -166,6 +147,72 @@ def validate_steam_id(steam_id: str) -> bool:
         return True
     else:
         return False
+
+@slash.slash(name="searchgame", description="Search a game on Steam", options=[{
+    "name": "game_name",
+    "description": "Name of the game to search",
+    "type": 3,
+    "required": True
+}])
+async def _searchgame(ctx: SlashContext, game_name: str):
+    game_info = search_steam_game(game_name)
+    if game_info:
+        embed = discord.Embed(title=game_info['name'], url=game_info['steam_url'], color=discord.Color.blue())
+        embed.set_image(url=game_info['header_image'])
+        embed.add_field(name="App ID", value=game_info['app_id'], inline=False)
+        embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("No game information found.")
+
+def update_owned_games(steam_id: str, discord_id: int):
+    base_url = f"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
+    params = {
+        'key': STEAM_API_KEY,
+        'steamid': steam_id,
+        'include_appinfo': 1
+    }
+    try:
+        response = requests.get(base_url, params=params)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logger.error(f"Error occurred while getting owned games: {e}")
+        return False
+
+    data = response.json()
+    games = data.get('response', {}).get('games', [])
+    
+    for game in games:
+        app_id = game['appid']
+        game_name = game['name']
+
+        # Insert game into Games table (ignore if already exists)
+        cursor.execute('''
+            INSERT OR IGNORE INTO Games (app_id, name)
+            VALUES (?, ?)
+        ''', (app_id, game_name))
+
+        # Insert game into UserGames table
+        cursor.execute('''
+            INSERT OR IGNORE INTO UserGames (discord_id, app_id)
+            VALUES (?, ?)
+        ''', (discord_id, app_id))
+
+    # Commit the transaction
+    conn.commit()
+
+    return True
+
+@slash.slash(
+    name="invite",
+    description="Generates an invite link for the bot.",
+    default_permission=False
+)
+async def invite(ctx):
+    permissions = discord.Permissions()
+    invite_link = discord.utils.oauth_url(ctx.bot.user.id, permissions=permissions)
+    await ctx.author.send(f"Invite link for the bot: {invite_link}")
+    await ctx.send("I've sent you a direct message with the invite link!")
 
 @slash.slash(
     name="linksteam",
@@ -200,8 +247,34 @@ async def _linksteam(ctx: SlashContext, steam_id: str):
         # Commit the transaction
         conn.commit()
 
-        await ctx.send("Successfully linked your Discord account to your Steam account.")
+        if update_owned_games(steam_id, ctx.author.id):
+            await ctx.send("Successfully linked your Discord account to your Steam account and updated your game list.")
+        else:
+            await ctx.send("Successfully linked your Discord account to your Steam account, but failed to update your game list.")
     except sqlite3.IntegrityError:
         await ctx.send("This Steam ID is already linked to a different Discord account.")
+
+@slash.slash(
+    name="updategames",
+    description="Updates your list of owned games."
+)
+async def _updategames(ctx: SlashContext):
+    # Get the user's Steam ID from the Users table
+    cursor.execute('''
+        SELECT steam_id
+        FROM Users
+        WHERE discord_id = ?
+    ''', (ctx.author.id,))
+
+    result = cursor.fetchone()
+    if result:
+        steam_id = result[0]
+
+        if update_owned_games(steam_id, ctx.author.id):
+            await ctx.send("Successfully updated your game list.")
+        else:
+            await ctx.send("Failed to update your game list.")
+    else:
+        await ctx.send("Your Discord account is not linked to any Steam account.")
 
 bot.run(TOKEN)
