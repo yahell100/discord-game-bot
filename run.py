@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import logging
+from decouple import config
 
 # Configure logger
 logger = logging.getLogger('discord')
@@ -29,13 +30,11 @@ logger.addHandler(file_handler)
 
 # Load environment variables from .env file
 load_dotenv()
-TOKEN = os.getenv('DISCORD_TOKEN')
+STEAM_API_KEY = config('STEAM_API_KEY')
+TOKEN = config('DISCORD_TOKEN')
 
 # Get the database file name from environment variable or fallback to default name
 DATABASE_FILE = os.getenv('DATABASE_FILE', 'bot.db')
-
-# Get your Steam API key from the environment variables
-STEAM_API_KEY = os.getenv('STEAM_API_KEY')
 
 # Check if the database file exists, create it if it doesn't
 if not os.path.exists(DATABASE_FILE):
@@ -46,50 +45,47 @@ if not os.path.exists(DATABASE_FILE):
 conn = sqlite3.connect(DATABASE_FILE)
 cursor = conn.cursor()
 
-# Create Users table
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS Users (
-        discord_id INTEGER PRIMARY KEY,
-        steam_id INTEGER UNIQUE NOT NULL
-    )
-''')
+# Create database tables and indexes
+def create_database_tables():
+    # Create Users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Users (
+            discord_id INTEGER PRIMARY KEY,
+            steam_id INTEGER UNIQUE NOT NULL
+        )
+    ''')
 
-# Create Games table
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS Games (
-        app_id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL
-    )
-''')
+    # Create Games table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Games (
+            app_id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL
+        )
+    ''')
 
-# Modify UserGames table
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS UserGames (
-        discord_id INTEGER,
-        app_id INTEGER,
-        installed BOOLEAN DEFAULT FALSE,
-        PRIMARY KEY (discord_id, app_id),
-        FOREIGN KEY (discord_id) REFERENCES Users (discord_id),
-        FOREIGN KEY (app_id) REFERENCES Games (app_id)
-    )
-''')
+    # Modify UserGames table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS UserGames (
+            discord_id INTEGER,
+            app_id INTEGER,
+            installed BOOLEAN DEFAULT FALSE,
+            PRIMARY KEY (discord_id, app_id),
+            FOREIGN KEY (discord_id) REFERENCES Users (discord_id),
+            FOREIGN KEY (app_id) REFERENCES Games (app_id)
+        )
+    ''')
 
-# Create indexes for improved query performance
+    # Create indexes for improved query performance
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_discord_id ON Users (discord_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_games_app_id ON Games (app_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_usergames_discord_id ON UserGames (discord_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_usergames_app_id ON UserGames (app_id)')
 
-# Index for Users table (discord_id column)
-cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_discord_id ON Users (discord_id)')
+    # Commit the transaction
+    conn.commit()
 
-# Index for Games table (app_id column)
-cursor.execute('CREATE INDEX IF NOT EXISTS idx_games_app_id ON Games (app_id)')
-
-# Index for UserGames table (discord_id column)
-cursor.execute('CREATE INDEX IF NOT EXISTS idx_usergames_discord_id ON UserGames (discord_id)')
-
-# Index for UserGames table (app_id column)
-cursor.execute('CREATE INDEX IF NOT EXISTS idx_usergames_app_id ON UserGames (app_id)')
-
-# Commit the transaction
-conn.commit()
+# Call the function to create database tables and indexes
+create_database_tables()
 
 # Create bot and slash command instances
 bot = commands.Bot(command_prefix='/', intents=discord.Intents.default())
