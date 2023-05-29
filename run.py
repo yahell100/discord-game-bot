@@ -3,6 +3,7 @@ import sys
 import sqlite3
 from dotenv import load_dotenv
 import discord
+from discord import Embed
 from discord.ext import commands
 from discord_slash import SlashCommand, SlashContext
 import requests
@@ -397,5 +398,63 @@ async def _listinstalledgames(ctx: SlashContext):
             await ctx.send(chunk)
     else:
         await ctx.send(installed_str)
+
+@slash.slash(
+    name="players",
+    description="Lists all players in the server who own a certain game.",
+    options=[
+        {
+            "name": "game",
+            "description": "Name or App ID of the game.",
+            "type": 3,
+            "required": True
+        }
+    ]
+)
+async def _players(ctx: SlashContext, game: str):
+    app_id = None
+    game_name = None
+
+    if game.isdigit():  # App ID was provided
+        app_id = int(game)
+        cursor.execute("SELECT name FROM Games WHERE app_id = ?", (app_id,))
+        game_info = cursor.fetchone()
+        if game_info:
+            game_name = game_info[0]
+    else:  # Game name was provided
+        cursor.execute("SELECT app_id FROM Games WHERE name = ?", (game,))
+        game_info = cursor.fetchone()
+        if game_info:
+            app_id = game_info[0]
+            game_name = game
+
+    if app_id is None:
+        await ctx.send(f"No game found with the name or App ID '{game}'")
+        return
+
+    # Fetch all users who own this game and whether they have it installed
+    cursor.execute('''
+        SELECT discord_id, installed FROM UserGames 
+        WHERE app_id = ?
+    ''', (app_id,))
+    game_owners = {row[0]: bool(row[1]) for row in cursor.fetchall()}
+
+    if not game_owners:
+        await ctx.send(f"No players in this server own the game '{game_name}'")
+        return
+
+    member_list = []
+    for discord_id, installed in game_owners.items():
+        user = await bot.fetch_user(int(discord_id))
+        name = f"{user.name} (Installed)" if installed else user.name
+        member_list.append(name)
+
+    member_names = "\n".join(member_list)
+
+    # Create embed
+    embed = Embed(title=game_name, url=f"https://store.steampowered.com/app/{app_id}")
+    embed.add_field(name="Players", value=member_names, inline=False)
+
+    await ctx.send(embed=embed)
 
 bot.run(TOKEN)
