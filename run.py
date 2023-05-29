@@ -294,10 +294,16 @@ async def _markinstalled(ctx: SlashContext, game: str):
     # Check if the game argument is a number (app ID) or a string (game name)
     if game.isnumeric():
         app_id = game
+        game_info = get_game_info(app_id)
+        if game_info is None:
+            await ctx.send("Invalid App ID.")
+            return
+        game_name = game_info['name']
     else:
         game_info = search_steam_game(game)
         if game_info:
             app_id = game_info['app_id']
+            game_name = game_info['name']
         else:
             await ctx.send("Game not found.")
             return
@@ -318,9 +324,78 @@ async def _markinstalled(ctx: SlashContext, game: str):
         ''', (ctx.author.id, app_id))
 
         conn.commit()
-        await ctx.send("Successfully marked the game as installed.")
+        await ctx.send(f"Successfully marked {game_name} as installed.")
     else:
-        await ctx.send("You don't own this game.")
+        await ctx.send(f"You don't own {game_name}.")
 
+@slash.slash(
+    name="markuninstalled",
+    description="Marks a game as uninstalled.",
+    options=[
+        {
+            "name": "game",
+            "description": "Name or App ID of the game to be uninstalled.",
+            "type": 3,
+            "required": True
+        }
+    ]
+)
+async def _markuninstalled(ctx: SlashContext, game: str):
+    app_id = None
+    game_name = None
+
+    if game.isdigit():  # App ID was provided
+        app_id = int(game)
+        cursor.execute("SELECT name FROM Games WHERE app_id = ?", (app_id,))
+        game_info = cursor.fetchone()
+        if game_info:
+            game_name = game_info[0]
+    else:  # Game name was provided
+        cursor.execute("SELECT app_id FROM Games WHERE name = ?", (game,))
+        game_info = cursor.fetchone()
+        if game_info:
+            app_id = game_info[0]
+            game_name = game
+
+    if app_id is None:
+        await ctx.send(f"No game found with the name or App ID '{game}'")
+        return
+
+    cursor.execute('''
+        UPDATE UserGames 
+        SET installed = 0
+        WHERE discord_id = ? AND app_id = ?
+    ''', (str(ctx.author.id), app_id))
+    conn.commit()
+
+    await ctx.send(f"Game '{game_name}' has been marked as uninstalled.")
+
+@slash.slash(
+    name="listinstalledgames",
+    description="Lists all games marked as installed by the user, grouped by installation status.",
+)
+async def _listinstalledgames(ctx: SlashContext):
+    cursor.execute('''
+        SELECT Games.name
+        FROM UserGames 
+        INNER JOIN Games ON UserGames.app_id = Games.app_id
+        WHERE UserGames.discord_id = ? AND UserGames.installed = 1
+    ''', (str(ctx.author.id),))
+
+    results = cursor.fetchall()
+    if not results:
+        await ctx.send("No installed games found.")
+        return
+
+    installed_games = [game_name for game_name, in results]
+
+    # Formatting the list of games using Discord's Markdown
+    installed_str = "**Installed Games**:\n" + "\n".join(f"• {game_name}" for game_name in installed_games)
+
+    if len(installed_str) > 2000:
+        for chunk in [installed_str[i:i + 2000] for i in range(0, len(installed_str), 2000)]:
+            await ctx.send(chunk)
+    else:
+        await ctx.send(installed_str)
 
 bot.run(TOKEN)
