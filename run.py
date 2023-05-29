@@ -66,6 +66,7 @@ cursor.execute('''
     CREATE TABLE IF NOT EXISTS UserGames (
         discord_id INTEGER,
         app_id INTEGER,
+        installed BOOLEAN DEFAULT FALSE,
         PRIMARY KEY (discord_id, app_id),
         FOREIGN KEY (discord_id) REFERENCES Users (discord_id),
         FOREIGN KEY (app_id) REFERENCES Games (app_id)
@@ -276,5 +277,50 @@ async def _updategames(ctx: SlashContext):
             await ctx.send("Failed to update your game list.")
     else:
         await ctx.send("Your Discord account is not linked to any Steam account.")
+
+@slash.slash(
+    name="markinstalled",
+    description="Marks a game as installed.",
+    options=[
+        {
+            "name": "game",
+            "description": "The app ID or name of the game.",
+            "type": 3,
+            "required": True
+        }
+    ]
+)
+async def _markinstalled(ctx: SlashContext, game: str):
+    # Check if the game argument is a number (app ID) or a string (game name)
+    if game.isnumeric():
+        app_id = game
+    else:
+        game_info = search_steam_game(game)
+        if game_info:
+            app_id = game_info['app_id']
+        else:
+            await ctx.send("Game not found.")
+            return
+
+    # Check if the game is owned by the user
+    cursor.execute('''
+        SELECT * FROM UserGames
+        WHERE discord_id = ? AND app_id = ?
+    ''', (ctx.author.id, app_id))
+
+    result = cursor.fetchone()
+    if result:
+        # The game is owned by the user, mark it as installed
+        cursor.execute('''
+            UPDATE UserGames
+            SET installed = TRUE
+            WHERE discord_id = ? AND app_id = ?
+        ''', (ctx.author.id, app_id))
+
+        conn.commit()
+        await ctx.send("Successfully marked the game as installed.")
+    else:
+        await ctx.send("You don't own this game.")
+
 
 bot.run(TOKEN)
