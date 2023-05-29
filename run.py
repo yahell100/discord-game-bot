@@ -74,6 +74,20 @@ cursor.execute('''
     )
 ''')
 
+# Create indexes for improved query performance
+
+# Index for Users table (discord_id column)
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_discord_id ON Users (discord_id)')
+
+# Index for Games table (app_id column)
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_games_app_id ON Games (app_id)')
+
+# Index for UserGames table (discord_id column)
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_usergames_discord_id ON UserGames (discord_id)')
+
+# Index for UserGames table (app_id column)
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_usergames_app_id ON UserGames (app_id)')
+
 # Commit the transaction
 conn.commit()
 
