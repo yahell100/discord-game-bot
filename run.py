@@ -457,4 +457,82 @@ async def _players(ctx: SlashContext, game: str):
 
     await ctx.send(embed=embed)
 
+@slash.slash(
+    name="sendmessage",
+    description="Send a message to players who own or have a game installed.",
+    options=[
+        {
+            "name": "game",
+            "description": "Name or App ID of the game.",
+            "type": 3,
+            "required": True
+        },
+        {
+            "name": "message",
+            "description": "Message to be sent.",
+            "type": 3,
+            "required": True
+        },
+        {
+            "name": "installed_only",
+            "description": "Send message only to players who have the game installed.",
+            "type": 5,
+            "required": False
+        }
+    ]
+)
+async def _sendmessage(ctx: SlashContext, game: str, message: str, installed_only: bool = False):
+    app_id = None
+    game_name = None
+
+    if game.isdigit():  # App ID was provided
+        app_id = int(game)
+        cursor.execute("SELECT name FROM Games WHERE app_id = ?", (app_id,))
+        game_info = cursor.fetchone()
+        if game_info:
+            game_name = game_info[0]
+    else:  # Game name was provided
+        cursor.execute("SELECT app_id FROM Games WHERE name = ?", (game,))
+        game_info = cursor.fetchone()
+        if game_info:
+            app_id = game_info[0]
+            game_name = game
+
+    if app_id is None:
+        await ctx.send(f"No game found with the name or App ID '{game}'")
+        return
+
+    # Fetch all users who own or have the game installed
+    cursor.execute('''
+        SELECT discord_id, installed FROM UserGames 
+        WHERE app_id = ?
+    ''', (app_id,))
+    game_players = {str(row[0]): bool(row[1]) for row in cursor.fetchall()}
+
+    if not game_players:
+        await ctx.send(f"No players found for the game '{game_name}'")
+        return
+
+    player_list = []
+
+    for discord_id, installed in game_players.items():
+        try:
+            member = await ctx.guild.fetch_member(int(discord_id))
+            if member:
+                if installed_only and not installed:
+                    continue
+                player_list.append(member.mention)
+        except discord.NotFound:
+            pass
+
+    if not player_list:
+        await ctx.send("No players found for the specified criteria.")
+        return
+
+    message_content = f"Message from {ctx.author.mention}: {message}"
+    mention_list = " ".join(player_list)
+
+    await ctx.send(f"Sending message to {len(player_list)} players...")
+    await ctx.send(f"{mention_list}\n\n{message_content}")
+
 bot.run(TOKEN)
