@@ -323,6 +323,46 @@ async def _linksteam(ctx: SlashContext, steam_id: str):
     except sqlite3.IntegrityError:
         await ctx.send("This Steam ID is already linked to a different Discord account.", hidden=True)
 
+@slash.slash(
+    name="unlinksteam",
+    description="Unlinks your currently linked Steam profile from your Discord account."
+)
+async def _unlinksteam(ctx: SlashContext):
+    try:
+        # Retrieve the linked Steam ID for the Discord user
+        cursor.execute('''
+            SELECT steam_id
+            FROM Users
+            WHERE discord_id = ?
+        ''', (ctx.author.id,))
+        result = cursor.fetchone()
+
+        if result:
+            steam_id = result[0]
+
+            # Delete the user's information from the Users and UserGames tables
+            try:
+                cursor.execute('''
+                    DELETE FROM Users
+                    WHERE discord_id = ?
+                ''', (ctx.author.id,))
+                cursor.execute('''
+                    DELETE FROM UserGames
+                    WHERE discord_id = ?
+                ''', (ctx.author.id,))
+                conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Error occurred while unlinking Steam profile from Discord account: {e}")
+                await ctx.send("Failed to unlink Steam profile. Please try again later.", hidden=True)
+                return
+
+            await ctx.send("Successfully unlinked Steam profile from your Discord account.", hidden=True)
+        else:
+            await ctx.send("Your Discord account is not linked to any Steam profile.", hidden=True)
+    except Exception as e:
+        logger.error(f"Error occurred while unlinking Steam profile: {e}")
+        await ctx.send("Failed to unlink Steam profile. Please try again later.", hidden=True)
+
 
 @slash.slash(
     name="updategames",
