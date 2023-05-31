@@ -160,6 +160,32 @@ def validate_steam_id(steam_id: str) -> bool:
     else:
         return False
 
+def get_steam_profile(steam_id: str):
+    base_url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/"
+    params = {
+        'key': STEAM_API_KEY,
+        'steamids': steam_id
+    }
+    try:
+        response = requests.get(base_url, params=params)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logger.error(f"Error occurred while retrieving Steam profile: {e}")
+        return None
+
+    data = response.json()
+    players = data.get('response', {}).get('players', [])
+    if players:
+        player_data = players[0]
+        return {
+            'name': player_data['personaname'],
+            'steam_id': player_data['steamid'],
+            'profile_image': player_data['avatarfull']
+        }
+    else:
+        logger.warning(f"No profile data available for Steam ID: {steam_id}")
+        return None
+
 @slash.slash(name="searchgame", description="Search a game on Steam", options=[{
     "name": "game_name",
     "description": "Name of the game to search",
@@ -257,6 +283,16 @@ async def _linksteam(ctx: SlashContext, steam_id: str):
         await ctx.send("Invalid Steam ID. Please enter a valid Steam ID.", hidden=True)
         return
 
+    # Get the Steam profile information
+    profile_info = get_steam_profile(steam_id)
+    if not profile_info:
+        await ctx.send("Failed to retrieve Steam profile information.", hidden=True)
+        return
+
+    steam_name = profile_info['name']
+    steam_id = profile_info['steam_id']
+    profile_image = profile_info['profile_image']
+
     try:
         # Insert the user's Discord ID and Steam ID into the Users table
         try:
@@ -272,12 +308,61 @@ async def _linksteam(ctx: SlashContext, steam_id: str):
         # Commit the transaction
         conn.commit()
 
+        # Create an embed to display the Steam profile information
+        embed = discord.Embed(title="Steam Profile Linked", description="Your Steam profile has been successfully linked!", color=discord.Color.green())
+        embed.add_field(name="Steam Name", value=steam_name, inline=False)
+        embed.add_field(name="Steam ID", value=steam_id, inline=False)
+        embed.set_thumbnail(url=profile_image)
+
+        await ctx.send(embed=embed, hidden=True)
+        
         if update_owned_games(steam_id, ctx.author.id):
             await ctx.send("Successfully linked your Discord account to your Steam account and updated your game list.", hidden=True)
         else:
             await ctx.send("Successfully linked your Discord account to your Steam account, but failed to update your game list.", hidden=True)
     except sqlite3.IntegrityError:
         await ctx.send("This Steam ID is already linked to a different Discord account.", hidden=True)
+
+@slash.slash(
+    name="unlinksteam",
+    description="Unlinks your currently linked Steam profile from your Discord account."
+)
+async def _unlinksteam(ctx: SlashContext):
+    try:
+        # Retrieve the linked Steam ID for the Discord user
+        cursor.execute('''
+            SELECT steam_id
+            FROM Users
+            WHERE discord_id = ?
+        ''', (ctx.author.id,))
+        result = cursor.fetchone()
+
+        if result:
+            steam_id = result[0]
+
+            # Delete the user's information from the Users and UserGames tables
+            try:
+                cursor.execute('''
+                    DELETE FROM Users
+                    WHERE discord_id = ?
+                ''', (ctx.author.id,))
+                cursor.execute('''
+                    DELETE FROM UserGames
+                    WHERE discord_id = ?
+                ''', (ctx.author.id,))
+                conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Error occurred while unlinking Steam profile from Discord account: {e}")
+                await ctx.send("Failed to unlink Steam profile. Please try again later.", hidden=True)
+                return
+
+            await ctx.send("Successfully unlinked Steam profile from your Discord account.", hidden=True)
+        else:
+            await ctx.send("Your Discord account is not linked to any Steam profile.", hidden=True)
+    except Exception as e:
+        logger.error(f"Error occurred while unlinking Steam profile: {e}")
+        await ctx.send("Failed to unlink Steam profile. Please try again later.", hidden=True)
+
 
 @slash.slash(
     name="updategames",
