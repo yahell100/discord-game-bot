@@ -400,7 +400,17 @@ async def _updategames(ctx: SlashContext):
     ]
 )
 async def _markinterest(ctx: SlashContext, game: str):
-    # Check if the game argument is a number (app ID) or a string (game name)
+    # Check if the user has linked their Steam account
+    cursor.execute('''
+        SELECT steam_id FROM Users
+        WHERE discord_id = ?
+    ''', (ctx.author.id,))
+    result = cursor.fetchone()
+    if result is None:
+        await ctx.send("You must link your Steam account before marking games as interested.", hidden=True)
+        return
+
+    # Rest of the code remains the same
     if game.isnumeric():
         app_id = game
         game_info = get_game_info(app_id)
@@ -441,6 +451,7 @@ async def _markinterest(ctx: SlashContext, game: str):
         await ctx.send(f"Successfully marked {game_name}.", hidden=True)
     else:
         await ctx.send(f"You don't own {game_name}.", hidden=True)
+
 
 @slash.slash(
     name="removeinterest",
