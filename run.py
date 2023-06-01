@@ -589,7 +589,7 @@ async def _players(ctx: SlashContext, game: str):
         member_list = []
         for discord_id, intersted in game_interst.items():
             user = await bot.fetch_user(int(discord_id))
-            name = f"{user.name} (Interest)" if intersted else user.name
+            name = f"{user.name} (Interested)" if intersted else user.name
             member_list.append(name)
 
         member_names = "\n".join(member_list)
