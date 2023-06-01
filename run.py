@@ -410,7 +410,6 @@ async def _markinterest(ctx: SlashContext, game: str):
         await ctx.send("You must link your Steam account before marking games as interested.", hidden=True)
         return
 
-    # Rest of the code remains the same
     if game.isnumeric():
         app_id = game
         game_info = get_game_info(app_id)
@@ -466,6 +465,16 @@ async def _markinterest(ctx: SlashContext, game: str):
     ]
 )
 async def _removeinterest(ctx: SlashContext, game: str):
+    # Check if the user has linked their Steam account
+    cursor.execute('''
+        SELECT steam_id FROM Users
+        WHERE discord_id = ?
+    ''', (ctx.author.id,))
+    result = cursor.fetchone()
+    if result is None:
+        await ctx.send("You must link your Steam account before removing games from your interests.", hidden=True)
+        return
+
     app_id = None
     game_name = None
 
@@ -498,6 +507,7 @@ async def _removeinterest(ctx: SlashContext, game: str):
     except sqlite3.Error as e:
         logger.error(f"Error occurred while unmarking game: {e}")
         await ctx.send("Failed to unmark the game.", hidden=True)
+
 
 @slash.slash(
     name="listinterestedgames",
