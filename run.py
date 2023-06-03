@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 import json
 import logging
 from decouple import config
+from fuzzywuzzy import fuzz
 
 # Configure logger
 logger = logging.getLogger('discord')
@@ -120,6 +121,16 @@ def get_game_info(app_id):
         return None
 
 def search_steam_game(game_name):
+    # Check if the game exists in the database
+    cursor.execute('''
+        SELECT app_id FROM Games
+        WHERE name LIKE ?
+    ''', ('%' + game_name + '%',))
+    result = cursor.fetchone()
+    if result:
+        app_id = result[0]
+        return get_game_info(app_id)
+    
     base_url = "https://store.steampowered.com/search/"
     params = {'term': game_name}
     try:
@@ -132,7 +143,12 @@ def search_steam_game(game_name):
     soup = BeautifulSoup(response.text, 'html.parser')
     search_results = soup.find_all('a', {'class': 'search_result_row'})
     if search_results:
-        first_result = search_results[0]
+        # Calculate the fuzzy match ratio for each search result
+        matches = [(result, fuzz.partial_ratio(game_name, result.get('data-ds-appid'))) for result in search_results]
+        # Sort the matches based on the match ratio in descending order
+        matches.sort(key=lambda x: x[1], reverse=True)
+        # Select the search result with the highest match ratio
+        first_result = matches[0][0]
         game_url = first_result.get('href')
         game_app_id = game_url.split('/')[4]
         return get_game_info(game_app_id)
@@ -199,6 +215,7 @@ async def _searchgame(ctx: SlashContext, game_name: str):
         embed.set_image(url=game_info['header_image'])
         embed.add_field(name="App ID", value=game_info['app_id'], inline=False)
         embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
+        embed.set_footer(text="\u24d8 Accuracy may vary, please use App ID to get exact results.")
         await ctx.send(embed=embed, hidden=True)
     else:
         await ctx.send("No game information found.", hidden=True)
