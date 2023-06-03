@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 import json
 import logging
 from decouple import config
+from fuzzywuzzy import fuzz
 
 # Configure logger
 logger = logging.getLogger('discord')
@@ -68,7 +69,7 @@ def create_database_tables():
         CREATE TABLE IF NOT EXISTS UserGames (
             discord_id INTEGER,
             app_id INTEGER,
-            installed BOOLEAN DEFAULT FALSE,
+            interested BOOLEAN DEFAULT FALSE,
             PRIMARY KEY (discord_id, app_id),
             FOREIGN KEY (discord_id) REFERENCES Users (discord_id),
             FOREIGN KEY (app_id) REFERENCES Games (app_id)
@@ -120,6 +121,16 @@ def get_game_info(app_id):
         return None
 
 def search_steam_game(game_name):
+    # Check if the game exists in the database
+    cursor.execute('''
+        SELECT app_id FROM Games
+        WHERE name LIKE ?
+    ''', ('%' + game_name + '%',))
+    result = cursor.fetchone()
+    if result:
+        app_id = result[0]
+        return get_game_info(app_id)
+    
     base_url = "https://store.steampowered.com/search/"
     params = {'term': game_name}
     try:
@@ -132,7 +143,12 @@ def search_steam_game(game_name):
     soup = BeautifulSoup(response.text, 'html.parser')
     search_results = soup.find_all('a', {'class': 'search_result_row'})
     if search_results:
-        first_result = search_results[0]
+        # Calculate the fuzzy match ratio for each search result
+        matches = [(result, fuzz.partial_ratio(game_name, result.get('data-ds-appid'))) for result in search_results]
+        # Sort the matches based on the match ratio in descending order
+        matches.sort(key=lambda x: x[1], reverse=True)
+        # Select the search result with the highest match ratio
+        first_result = matches[0][0]
         game_url = first_result.get('href')
         game_app_id = game_url.split('/')[4]
         return get_game_info(game_app_id)
@@ -199,6 +215,7 @@ async def _searchgame(ctx: SlashContext, game_name: str):
         embed.set_image(url=game_info['header_image'])
         embed.add_field(name="App ID", value=game_info['app_id'], inline=False)
         embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
+        embed.set_footer(text="\u24d8 Accuracy may vary, please use App ID to get exact results.")
         await ctx.send(embed=embed, hidden=True)
     else:
         await ctx.send("No game information found.", hidden=True)
@@ -388,8 +405,8 @@ async def _updategames(ctx: SlashContext):
         await ctx.send("Your Discord account is not linked to any Steam account.", hidden=True)
 
 @slash.slash(
-    name="markinstalled",
-    description="Marks a game as installed.",
+    name="markinterest",
+    description="Marks a game as interest.",
     options=[
         {
             "name": "game",
@@ -399,8 +416,17 @@ async def _updategames(ctx: SlashContext):
         }
     ]
 )
-async def _markinstalled(ctx: SlashContext, game: str):
-    # Check if the game argument is a number (app ID) or a string (game name)
+async def _markinterest(ctx: SlashContext, game: str):
+    # Check if the user has linked their Steam account
+    cursor.execute('''
+        SELECT steam_id FROM Users
+        WHERE discord_id = ?
+    ''', (ctx.author.id,))
+    result = cursor.fetchone()
+    if result is None:
+        await ctx.send("You must link your Steam account before marking games as interested.", hidden=True)
+        return
+
     if game.isnumeric():
         app_id = game
         game_info = get_game_info(app_id)
@@ -425,36 +451,47 @@ async def _markinstalled(ctx: SlashContext, game: str):
 
     result = cursor.fetchone()
     if result:
-        # The game is owned by the user, mark it as installed
+        # The game is owned by the user, mark it as interested
         try:
             cursor.execute('''
                 UPDATE UserGames
-                SET installed = TRUE
+                SET interested = TRUE
                 WHERE discord_id = ? AND app_id = ?
             ''', (ctx.author.id, app_id))
         except sqlite3.Error as e:
-            logger.error(f"Error occurred while marking game as installed: {e}")
-            await ctx.send("Failed to mark the game as installed.", hidden=True)
+            logger.error(f"Error occurred while marking game: {e}")
+            await ctx.send("Failed to mark the game.", hidden=True)
             return
 
         conn.commit()
-        await ctx.send(f"Successfully marked {game_name} as installed.", hidden=True)
+        await ctx.send(f"Successfully marked {game_name}.", hidden=True)
     else:
         await ctx.send(f"You don't own {game_name}.", hidden=True)
 
+
 @slash.slash(
-    name="markuninstalled",
-    description="Marks a game as uninstalled.",
+    name="removeinterest",
+    description="Unmarks a game as interetsted.",
     options=[
         {
             "name": "game",
-            "description": "Name or App ID of the game to be uninstalled.",
+            "description": "Name or App ID of the game to be unmarked.",
             "type": 3,
             "required": True
         }
     ]
 )
-async def _markuninstalled(ctx: SlashContext, game: str):
+async def _removeinterest(ctx: SlashContext, game: str):
+    # Check if the user has linked their Steam account
+    cursor.execute('''
+        SELECT steam_id FROM Users
+        WHERE discord_id = ?
+    ''', (ctx.author.id,))
+    result = cursor.fetchone()
+    if result is None:
+        await ctx.send("You must link your Steam account before removing games from your interests.", hidden=True)
+        return
+
     app_id = None
     game_name = None
 
@@ -478,47 +515,48 @@ async def _markuninstalled(ctx: SlashContext, game: str):
     try:
         cursor.execute('''
             UPDATE UserGames 
-            SET installed = 0
+            SET interested = 0
             WHERE discord_id = ? AND app_id = ?
         ''', (str(ctx.author.id), app_id))
         conn.commit()
 
-        await ctx.send(f"Game '{game_name}' has been marked as uninstalled.", hidden=True)
+        await ctx.send(f"Game '{game_name}' has been unmarked.", hidden=True)
     except sqlite3.Error as e:
-        logger.error(f"Error occurred while marking game as uninstalled: {e}")
-        await ctx.send("Failed to mark the game as uninstalled.", hidden=True)
+        logger.error(f"Error occurred while unmarking game: {e}")
+        await ctx.send("Failed to unmark the game.", hidden=True)
+
 
 @slash.slash(
-    name="listinstalledgames",
-    description="Lists all games marked as installed by the user, grouped by installation status.",
+    name="listinterestedgames",
+    description="Lists all games marked as interested by the user.",
 )
-async def _listinstalledgames(ctx: SlashContext):
+async def _listinterestedgames(ctx: SlashContext):
     try:
         cursor.execute('''
             SELECT Games.name
             FROM UserGames 
             INNER JOIN Games ON UserGames.app_id = Games.app_id
-            WHERE UserGames.discord_id = ? AND UserGames.installed = 1
+            WHERE UserGames.discord_id = ? AND UserGames.interested = 1
         ''', (str(ctx.author.id),))
 
         results = cursor.fetchall()
         if not results:
-            await ctx.send("No installed games found.")
+            await ctx.send("You've not marked any games as interested.", hidden=True)
             return
 
-        installed_games = [game_name for game_name, in results]
+        interested_games = [game_name for game_name, in results]
 
         # Formatting the list of games using Discord's Markdown
-        installed_str = "**Installed Games**:\n" + "\n".join(f"• {game_name}" for game_name in installed_games)
+        interested_str = "**Interested Games**:\n" + "\n".join(f"• {game_name}" for game_name in interested_games)
 
-        if len(installed_str) > 2000:
-            for chunk in [installed_str[i:i + 2000] for i in range(0, len(installed_str), 2000)]:
+        if len(interested_str) > 2000:
+            for chunk in [interested_str[i:i + 2000] for i in range(0, len(interested_str), 2000)]:
                 await ctx.send(chunk, hidden=True)
         else:
-            await ctx.send(installed_str, hidden=True)
+            await ctx.send(interested_str, hidden=True)
     except sqlite3.Error as e:
-        logger.error(f"Error occurred while listing installed games: {e}")
-        await ctx.send("Failed to list installed games.", hidden=True)
+        logger.error(f"Error occurred while listing interested games: {e}")
+        await ctx.send("Failed to list interested games.", hidden=True)
 
 @slash.slash(
     name="players",
@@ -554,21 +592,21 @@ async def _players(ctx: SlashContext, game: str):
         return
 
     try:
-        # Fetch all users who own this game and whether they have it installed
+        # Fetch all users who own this game and whether they have marked interest
         cursor.execute('''
-            SELECT discord_id, installed FROM UserGames 
+            SELECT discord_id, interested FROM UserGames 
             WHERE app_id = ?
         ''', (app_id,))
-        game_owners = {row[0]: bool(row[1]) for row in cursor.fetchall()}
+        game_interst = {row[0]: bool(row[1]) for row in cursor.fetchall()}
 
-        if not game_owners:
+        if not game_interst:
             await ctx.send(f"No players in this server own the game '{game_name}'", hidden=True)
             return
 
         member_list = []
-        for discord_id, installed in game_owners.items():
+        for discord_id, intersted in game_interst.items():
             user = await bot.fetch_user(int(discord_id))
-            name = f"{user.name} (Installed)" if installed else user.name
+            name = f"{user.name} (Interested)" if intersted else user.name
             member_list.append(name)
 
         member_names = "\n".join(member_list)
@@ -584,7 +622,7 @@ async def _players(ctx: SlashContext, game: str):
 
 @slash.slash(
     name="sendmessage",
-    description="Send a message to players who own or have a game installed.",
+    description="Send a message to players who own or have marked interest in the game.",
     options=[
         {
             "name": "game",
@@ -599,14 +637,14 @@ async def _players(ctx: SlashContext, game: str):
             "required": True
         },
         {
-            "name": "installed_only",
-            "description": "Send message only to players who have the game installed.",
+            "name": "interest_only",
+            "description": "Send message only to players who marked interest in the game.",
             "type": 5,
             "required": False
         }
     ]
 )
-async def _sendmessage(ctx: SlashContext, game: str, message: str, installed_only: bool = False):
+async def _sendmessage(ctx: SlashContext, game: str, message: str, interest_only: bool = False):
     app_id = None
     game_name = None
 
@@ -628,9 +666,9 @@ async def _sendmessage(ctx: SlashContext, game: str, message: str, installed_onl
         return
 
     try:
-        # Fetch all users who own or have the game installed
+        # Fetch all users who own or have interest
         cursor.execute('''
-            SELECT discord_id, installed FROM UserGames 
+            SELECT discord_id, interested FROM UserGames 
             WHERE app_id = ?
         ''', (app_id,))
         game_players = {str(row[0]): bool(row[1]) for row in cursor.fetchall()}
@@ -641,11 +679,11 @@ async def _sendmessage(ctx: SlashContext, game: str, message: str, installed_onl
 
         player_list = []
 
-        for discord_id, installed in game_players.items():
+        for discord_id, interested in game_players.items():
             try:
                 member = await ctx.guild.fetch_member(int(discord_id))
                 if member:
-                    if installed_only and not installed:
+                    if interest_only and not interested:
                         continue
                     player_list.append(member.mention)
             except discord.NotFound:
