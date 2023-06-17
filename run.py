@@ -750,7 +750,6 @@ async def _sendgamemessage(ctx: SlashContext, game: str, message: str, event_lin
     if game_info:
         embed = discord.Embed(title=game_info['name'], url=game_info['steam_url'], color=discord.Color.blue())
         embed.set_image(url=game_info['header_image'])
-        embed.add_field(name="App ID", value=game_info['app_id'], inline=False)
         embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
         if event_link:
             embed.add_field(name="Event Link", value=event_link, inline=False)
