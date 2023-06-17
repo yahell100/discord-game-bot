@@ -12,6 +12,8 @@ import json
 import logging
 from decouple import config
 from fuzzywuzzy import fuzz
+from typing import Optional
+
 
 # Configure logger
 logger = logging.getLogger('discord')
@@ -701,5 +703,59 @@ async def _sendmessage(ctx: SlashContext, game: str, message: str, interest_only
     except sqlite3.Error as e:
         logger.error(f"Error occurred while sending message to players: {e}")
         await ctx.send("Failed to send message to players.", hidden=True)
+
+@slash.slash(
+    name="sendgamemessage",
+    description="Send game information with a message and an optional event link.",
+    options=[
+        {
+            "name": "game",
+            "description": "Name or App ID of the game.",
+            "type": 3,
+            "required": True
+        },
+        {
+            "name": "message",
+            "description": "Message to be sent.",
+            "type": 3,
+            "required": True
+        },
+        {
+            "name": "event_link",
+            "description": "Optional Discord event link.",
+            "type": 3,
+            "required": False
+        }
+    ]
+)
+async def _sendgamemessage(ctx: SlashContext, game: str, message: str, event_link: Optional[str] = None):
+    app_id = None
+    game_name = None
+
+    if game.isdigit():  # App ID was provided
+        app_id = int(game)
+        game_info = get_game_info(app_id)
+        if game_info:
+            game_name = game_info['name']
+    else:  # Game name was provided
+        game_info = search_steam_game(game)
+        if game_info:
+            app_id = game_info['app_id']
+            game_name = game_info['name']
+
+    if app_id is None:
+        await ctx.send(f"No game found with the name or App ID '{game}'", hidden=True)
+        return
+
+    if game_info:
+        embed = discord.Embed(title=game_info['name'], url=game_info['steam_url'], color=discord.Color.blue())
+        embed.set_image(url=game_info['header_image'])
+        embed.add_field(name="App ID", value=game_info['app_id'], inline=False)
+        embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
+        if event_link:
+            embed.add_field(name="Event Link", value=event_link, inline=False)
+        await ctx.send(embed=embed, content=message, hidden=False)
+    else:
+        await ctx.send("No game information found.", hidden=True)
 
 bot.run(TOKEN)
