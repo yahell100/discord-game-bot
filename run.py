@@ -757,4 +757,131 @@ async def _sendgamemessage(ctx: SlashContext, game: str, message: str, event_lin
     else:
         await ctx.send("No game information found.", hidden=True)
 
+@slash.slash(
+    name="sendmultigamemessage",
+    description="Send game information with a message and an optional event link for multiple games.",
+    options=[
+        {
+            "name": "games",
+            "description": "List of games to send information for.",
+            "type": 3,
+            "required": True,
+            "choices": []  # Placeholder for dynamic choices
+        },
+        {
+            "name": "title",
+            "description": "Message Title to be sent.",
+            "type": 3,
+            "required": True
+        },
+        {
+            "name": "message",
+            "description": "Message to be sent.",
+            "type": 3,
+            "required": False
+        },
+        {
+            "name": "event_link",
+            "description": "Optional Discord event link.",
+            "type": 3,
+            "required": False
+        }
+    ]
+)
+async def _sendmultigamemessage(ctx: SlashContext, games: str, title: str, message: str, event_link: Optional[str] = None):
+    game_list = games.split(",")  # Split the input string into a list of games
+
+    # Retrieve game choices from the database
+    cursor.execute("SELECT app_id, name FROM Games")
+    game_choices = [(name, str(app_id)) for app_id, name in cursor.fetchall()]
+
+    options = [
+        {
+            "name": "game",
+            "description": "Name or App ID of the game.",
+            "type": 3,
+            "required": True,
+            "choices": game_choices
+        },
+        {
+            "name": "title",
+            "description": "Message Title to be sent.",
+            "type": 3,
+            "required": True
+        },
+        {
+            "name": "message",
+            "description": "Message to be sent.",
+            "type": 3,
+            "required": False  # Not required for individual game choices
+        },
+        {
+            "name": "event_link",
+            "description": "Optional Discord event link.",
+            "type": 3,
+            "required": False  # Not required for individual game choices
+        }
+    ]
+
+    # Update the choices of the 'games' option dynamically
+    for option in options:
+        if option["name"] == "games":
+            option["choices"] = game_choices
+            break
+
+    # Create an embed for the event link if provided
+    event_embed = None
+    if event_link:
+        event_embed = discord.Embed(color=discord.Color.green())
+        event_embed.title = title
+        event_embed.description = message
+        event_embed.add_field(name="Event Link", value=event_link, inline=False)
+    else:
+        event_embed = discord.Embed(color=discord.Color.green())
+        event_embed.title = title
+        event_embed.description = message
+
+    game_embeds = []
+    for i, game in enumerate(game_list):
+        app_id = None
+        game_name = None
+
+        if game.isdigit():  # App ID was provided
+            app_id = int(game)
+            cursor.execute("SELECT name FROM Games WHERE app_id = ?", (app_id,))
+            game_info = cursor.fetchone()
+            if game_info:
+                game_name = game_info[0]
+        else:  # Game name was provided
+            cursor.execute("SELECT app_id FROM Games WHERE name = ?", (game,))
+            game_info = cursor.fetchone()
+            if game_info:
+                app_id = game_info[0]
+                cursor.execute("SELECT name FROM Games WHERE app_id = ?", (app_id,))
+                game_name = cursor.fetchone()[0]
+
+        if app_id is None:
+            await ctx.send(f"No game found with the name or App ID '{game}'", hidden=True)
+            continue
+
+        if game_name:
+            game_info = get_game_info(app_id)
+            if game_info:
+                embed = discord.Embed(title=game_name, url=game_info['steam_url'], color=discord.Color.blue())
+                embed.set_image(url=game_info['header_image'])
+                embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
+
+                game_embeds.append(embed)
+            else:
+                await ctx.send("No game information found.", hidden=True)
+                continue
+
+    # Send the event link embed if provided
+    if event_embed:
+        await ctx.send(embed=event_embed)
+
+    # Send the game information embeds
+    for embed in game_embeds:
+        await ctx.send(embed=embed)
+
 bot.run(TOKEN)
