@@ -791,58 +791,17 @@ async def _sendgamemessage(ctx: SlashContext, game: str, message: str, event_lin
 async def _sendmultigamemessage(ctx: SlashContext, games: str, title: str, message: str, event_link: Optional[str] = None):
     game_list = [game.strip() for game in games.split(",")]  # Split and strip games, removing leading/trailing spaces
 
-    # Retrieve game choices from the database
-    cursor.execute("SELECT app_id, name FROM Games")
-    game_choices = [(name, str(app_id)) for app_id, name in cursor.fetchall()]
-
-    options = [
-        {
-            "name": "game",
-            "description": "Name or App ID of the game.",
-            "type": 3,
-            "required": True,
-            "choices": game_choices
-        },
-        {
-            "name": "title",
-            "description": "Message Title to be sent.",
-            "type": 3,
-            "required": True
-        },
-        {
-            "name": "message",
-            "description": "Message to be sent.",
-            "type": 3,
-            "required": False  # Not required for individual game choices
-        },
-        {
-            "name": "event_link",
-            "description": "Optional Discord event link.",
-            "type": 3,
-            "required": False  # Not required for individual game choices
-        }
-    ]
-
-    # Update the choices of the 'games' option dynamically
-    for option in options:
-        if option["name"] == "games":
-            option["choices"] = game_choices
-            break
-
     # Create an embed for the event link if provided
     event_embed = None
     if event_link:
         event_embed = discord.Embed(color=discord.Color.green())
-        event_embed.title = title
-        event_embed.description = message
         event_embed.add_field(name="Event Link", value=event_link, inline=False)
-    else:
-        event_embed = discord.Embed(color=discord.Color.green())
-        event_embed.title = title
-        event_embed.description = message
 
-    game_embeds = []
-    for i, game in enumerate(game_list):
+    game_info_embed = discord.Embed(color=discord.Color.blue())
+    game_info_embed.title = title
+    game_info_embed.description = message
+
+    for game in game_list:
         app_id = None
         game_name = None
 
@@ -867,21 +826,17 @@ async def _sendmultigamemessage(ctx: SlashContext, games: str, title: str, messa
         if game_name:
             game_info = get_game_info(app_id)
             if game_info:
-                embed = discord.Embed(title=game_name, url=game_info['steam_url'], color=discord.Color.blue())
-                embed.set_image(url=game_info['header_image'])
-                embed.add_field(name="Steam Store Page", value=game_info['steam_url'], inline=False)
-
-                game_embeds.append(embed)
+                game_info_embed.add_field(name=game_name, value=game_info['steam_url'], inline=False)
+                game_info_embed.set_thumbnail(url=game_info['header_image'])
             else:
                 await ctx.send("No game information found.", hidden=True)
                 continue
 
-    # Send the event link embed if provided
+    # Add the event link embed to the main game info embed if provided
     if event_embed:
-        await ctx.send(embed=event_embed)
+        game_info_embed.insert_field_at(0, name="Event Link", value=event_link, inline=False)
 
-    # Send the game information embeds
-    for embed in game_embeds:
-        await ctx.send(embed=embed)
+    # Send the main game info embed
+    await ctx.send(embed=game_info_embed)
 
 bot.run(TOKEN)
