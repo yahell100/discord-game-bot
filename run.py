@@ -789,7 +789,7 @@ async def _sendgamemessage(ctx: SlashContext, game: str, message: str, event_lin
     ]
 )
 async def _sendmultigamemessage(ctx: SlashContext, games: str, title: str, message: str, event_link: Optional[str] = None):
-    game_list = games.split(",")  # Split the input string into a list of games
+    game_list = [game.strip() for game in games.split(",")]  # Split and strip games, removing leading/trailing spaces
 
     # Retrieve game choices from the database
     cursor.execute("SELECT app_id, name FROM Games")
